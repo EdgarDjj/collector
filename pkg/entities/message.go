@@ -12,8 +12,6 @@ const (
 )
 
 // Message represents IPFIX message.
-// TODO: Currently, it supports only one set. This will be extended to support multiple
-// sets.
 type Message struct {
 	buffer        *bytes.Buffer
 	version       uint16

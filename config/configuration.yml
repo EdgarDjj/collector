@@ -1,6 +1,0 @@
-udp:
-  host: 0.0.0.0
-  port: 4739
-kafka:
-  host: 10.230.4.20
-  port: 9092

@@ -1,0 +1,9 @@
+udp:
+  host: 0.0.0.0
+  port: 4739
+kafka:
+  host: 127.0.0.1
+  port: 9092
+  topic: mykafka
+maxBufSize: 65535
+ttl: 0

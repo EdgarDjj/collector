@@ -5,14 +5,14 @@ import (
 	"collector/pkg/entities"
 	"collector/pkg/registry"
 	"fmt"
-	"log"
+	"github.com/Shopify/sarama"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
-
 
 func printIPFIXMessage(msg *entities.Message) {
 	var buf bytes.Buffer
@@ -39,15 +39,14 @@ func printIPFIXMessage(msg *entities.Message) {
 			}
 		}
 	}
+	fmt.Println(buf.String())
 }
 
 var (
 	IPFIXAddr      string
 	IPFIXPort      uint16
 	IPFIXTransport string
-	LOGGER log.Logger
 )
-
 
 func main() {
 	// load the IPFIX global registry
@@ -57,7 +56,6 @@ func main() {
 	IPFIXAddr = c.udpConfig.Host
 	IPFIXTransport = "udp"
 	IPFIXPort = uint16(c.udpConfig.Port)
-
 	cpInput := CollectorInput{
 		Address:       IPFIXAddr + ":" + strconv.Itoa(int(IPFIXPort)),
 		Protocol:      IPFIXTransport,
@@ -66,6 +64,27 @@ func main() {
 		IsEncrypted:   false,
 		ServerCert:    nil,
 		ServerKey:     nil,
+	}
+	if c.maxBufSize != 0 {
+		cpInput.MaxBufferSize = uint16(c.maxBufSize)
+	}
+	if c.ttl != 0 {
+		cpInput.TemplateTTL = uint32(c.ttl)
+	}
+
+	kafkaConfig := sarama.NewConfig()
+	kafkaConfig.Version = KafkaConfigVersion
+	kafkaConfig.Producer.Return.Successes = true
+	kafkaConfig.Producer.Return.Errors = true
+	kafkaConfig.Producer.Retry.Max = 5
+	topic := c.kafkaConfig.Topic
+	kafkaHost := c.kafkaConfig.Host
+	kafkaPort := c.kafkaConfig.Port
+	addr := strings.Join([]string{kafkaHost, strconv.Itoa(kafkaPort)}, ":")
+	adders := []string{addr}
+	producer, err := sarama.NewAsyncProducer(adders, kafkaConfig)
+	if err != nil {
+		fmt.Println("create new AsyncProducer failed!")
 	}
 
 	cp, err := InitCollectingProcess(cpInput)
@@ -78,13 +97,16 @@ func main() {
 		go cp.Start()
 		msgChan := cp.GetMsgChan()
 		for message := range msgChan {
-			LOGGER.Print("$$ Processing IPFIX message!!!!!!")
+			fmt.Println("$$$ Processing IPFIX message!!!!!!")
 			messageReceived <- message
 		}
 	}()
-
 	stopCh := make(chan struct{})
 	go signalHandler(stopCh, messageReceived)
+
+	kafkaProducer := NewKafkaProducer(producer, topic)
+	kafkaProducer.Publish(messageReceived)
+
 	<-stopCh
 	cp.Stop()
 }

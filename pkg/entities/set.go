@@ -8,7 +8,7 @@ import (
 
 const (
 	// TemplateRefreshTimeOut is the template refresh time out for exporting process
-	TemplateRefreshTimeOut uint32 = 1800
+	TemplateRefreshTimeOut uint32 = 60
 	// TemplateTTL is the template time to live for collecting process
 	TemplateTTL = TemplateRefreshTimeOut * 3
 	// TemplateSetID is the setID for template record

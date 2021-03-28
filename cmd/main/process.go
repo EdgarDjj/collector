@@ -44,15 +44,15 @@ type CollectingProcess struct {
 
 type CollectorInput struct {
 	// Address needs to be provided in hostIP:port format.
-	Address string
+	Address       string
 	Protocol      string
 	MaxBufferSize uint16
 	TemplateTTL   uint32
 	IsEncrypted   bool
-	CACert     []byte
-	ServerCert []byte
-	ServerKey  []byte
-	IsIPv6     bool
+	CACert        []byte
+	ServerCert    []byte
+	ServerKey     []byte
+	IsIPv6        bool
 }
 
 type clientHandler struct {
@@ -81,7 +81,10 @@ func InitCollectingProcess(input CollectorInput) (*CollectingProcess, error) {
 
 func (cp *CollectingProcess) Start() {
 	if cp.protocol == "udp" {
+		fmt.Println("$$$ start UDP Server!")
 		cp.startUDPServer()
+	} else {
+		fmt.Println("!!! fail to start UDP Server!")
 	}
 }
 
