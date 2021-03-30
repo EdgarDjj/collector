@@ -179,8 +179,7 @@ func (cp *CollectingProcess) decodePacket(packetBuffer *bytes.Buffer, exportAddr
 		}
 	}
 	message.AddSet(set)
-
-	// the thread(s)/client(s) executing the code will get blocked until the message is consumed/read in other goroutines.
+	// TODO: 如果messageChan不被消费，将会阻塞
 	cp.messageChan <- message
 	return message, nil
 }

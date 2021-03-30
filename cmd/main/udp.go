@@ -73,7 +73,7 @@ func (cp *CollectingProcess) handleUDPClient(address net.Addr, wg *sync.WaitGrou
 					if err != nil {
 						return
 					}
-					fmt.Println("$$$ the message:", message)
+					fmt.Println("$$$ the decodePacket: ", message)
 					ticker.Stop()
 					ticker = time.NewTicker(time.Duration(entities.TemplateRefreshTimeOut) * time.Second)
 				}

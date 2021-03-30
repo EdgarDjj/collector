@@ -6,6 +6,7 @@ import (
 	"collector/pkg/registry"
 	"fmt"
 	"github.com/Shopify/sarama"
+	"log"
 	"os"
 	"os/signal"
 	"strconv"
@@ -14,7 +15,110 @@ import (
 	"time"
 )
 
-func printIPFIXMessage(msg *entities.Message) {
+var (
+	IPFIXAddr      string
+	IPFIXPort      uint16
+	IPFIXTransport string
+)
+var c = GetConfig()
+
+func main() {
+	// load the IPFIX global registry
+	registry.LoadRegistry()
+	// load config
+	IPFIXAddr = c.udpConfig.Host
+	IPFIXTransport = "udp"
+	IPFIXPort = uint16(c.udpConfig.Port)
+	cpInput := CollectorInput{
+		Address:       IPFIXAddr + ":" + strconv.Itoa(int(IPFIXPort)),
+		Protocol:      IPFIXTransport,
+		MaxBufferSize: 65535,
+		TemplateTTL:   0,
+		IsEncrypted:   false,
+		ServerCert:    nil,
+		ServerKey:     nil,
+	}
+	if c.maxBufSize != 0 {
+		cpInput.MaxBufferSize = uint16(c.maxBufSize)
+	}
+	if c.ttl != 0 {
+		cpInput.TemplateTTL = uint32(c.ttl)
+	}
+
+	cp, err := InitCollectingProcess(cpInput)
+	if err != nil {
+		panic(err)
+	}
+	// 监听连接与接受消息
+	messageReceived := make(chan *entities.Message)
+	go func() {
+		go cp.Start()
+		msgChan := cp.GetMsgChan()
+		for message := range msgChan {
+			messageReceived <- message
+		}
+	}()
+	stopCh := make(chan struct{})
+	go signalHandler(stopCh, messageReceived)
+
+	<-stopCh
+	cp.Stop()
+}
+
+func signalHandler(stopCh chan struct{}, messageReceived chan *entities.Message) {
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	for {
+		select {
+		case msg := <-messageReceived:
+			// kafka的消费
+			buf := printIPFIXMessage(msg)
+			sendMessageByKafka(buf)
+		case <-signalCh:
+			close(stopCh)
+			return
+		}
+	}
+}
+
+// 三种连接kafka方式 1、无认证 2、TLS认证 3、SASL/PLAIN
+func sendMessageByKafka(buf bytes.Buffer) {
+	topic := c.kafkaConfig.Topic
+	producer, err := newSyncProducer()
+	log.Printf("$$$ start send Message to Kafka, the topic is %s\n", topic)
+	if err != nil {
+		log.Fatalln("Failed to start start Sarama producer: ", err)
+		return
+	}
+	msgToSend := buf.Bytes()
+	messageSend := &sarama.ProducerMessage{
+		Topic: topic,
+		Value: sarama.ByteEncoder(msgToSend),
+	}
+	pid, offset, err := producer.SendMessage(messageSend)
+	if err != nil {
+		log.Fatalln("send message Failed!")
+	} else {
+		log.Printf("Message send: %s pid: %v offset: %v", messageSend, pid, offset)
+	}
+}
+
+func newSyncProducer() (sarama.SyncProducer, error) {
+	kafkaHost := c.kafkaConfig.Host
+	kafkaPort := c.kafkaConfig.Port
+	addr := strings.Join([]string{kafkaHost, strconv.Itoa(kafkaPort)}, ":")
+	brokerList := []string{addr}
+	config := sarama.NewConfig()
+
+	config.Producer.Return.Successes = true
+	producer, err := sarama.NewSyncProducer(brokerList, config)
+	if err != nil {
+		return nil, err
+	}
+	return producer, err
+}
+
+func printIPFIXMessage(msg *entities.Message) bytes.Buffer {
 	var buf bytes.Buffer
 	fmt.Fprint(&buf, "\nIPFIX-HDR:\n")
 	fmt.Fprintf(&buf, "  version: %v,  Message Length: %v\n", msg.GetVersion(), msg.GetMessageLen())
@@ -40,87 +144,6 @@ func printIPFIXMessage(msg *entities.Message) {
 		}
 	}
 	fmt.Println(buf.String())
-}
-
-var (
-	IPFIXAddr      string
-	IPFIXPort      uint16
-	IPFIXTransport string
-)
-
-func main() {
-	// load the IPFIX global registry
-	registry.LoadRegistry()
-	// load config
-	c := GetConfig()
-	IPFIXAddr = c.udpConfig.Host
-	IPFIXTransport = "udp"
-	IPFIXPort = uint16(c.udpConfig.Port)
-	cpInput := CollectorInput{
-		Address:       IPFIXAddr + ":" + strconv.Itoa(int(IPFIXPort)),
-		Protocol:      IPFIXTransport,
-		MaxBufferSize: 65535,
-		TemplateTTL:   0,
-		IsEncrypted:   false,
-		ServerCert:    nil,
-		ServerKey:     nil,
-	}
-	if c.maxBufSize != 0 {
-		cpInput.MaxBufferSize = uint16(c.maxBufSize)
-	}
-	if c.ttl != 0 {
-		cpInput.TemplateTTL = uint32(c.ttl)
-	}
-
-	kafkaConfig := sarama.NewConfig()
-	kafkaConfig.Version = KafkaConfigVersion
-	kafkaConfig.Producer.Return.Successes = true
-	kafkaConfig.Producer.Return.Errors = true
-	kafkaConfig.Producer.Retry.Max = 5
-	topic := c.kafkaConfig.Topic
-	kafkaHost := c.kafkaConfig.Host
-	kafkaPort := c.kafkaConfig.Port
-	addr := strings.Join([]string{kafkaHost, strconv.Itoa(kafkaPort)}, ":")
-	adders := []string{addr}
-	producer, err := sarama.NewAsyncProducer(adders, kafkaConfig)
-	if err != nil {
-		fmt.Println("create new AsyncProducer failed!")
-	}
-
-	cp, err := InitCollectingProcess(cpInput)
-	if err != nil {
-		panic(err)
-	}
-	// 监听连接与接受消息
-	messageReceived := make(chan *entities.Message)
-	go func() {
-		go cp.Start()
-		msgChan := cp.GetMsgChan()
-		for message := range msgChan {
-			fmt.Println("$$$ Processing IPFIX message!!!!!!")
-			messageReceived <- message
-		}
-	}()
-	stopCh := make(chan struct{})
-	go signalHandler(stopCh, messageReceived)
-
-	kafkaProducer := NewKafkaProducer(producer, topic)
-	kafkaProducer.Publish(messageReceived)
-
-	<-stopCh
-	cp.Stop()
-}
-
-func signalHandler(stopCh chan struct{}, messageReceived chan *entities.Message) {
-	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	for {
-		select {
-		case msg := <-messageReceived:
-			printIPFIXMessage(msg)
-		case <-signalCh:
-			close(stopCh)
-			return
-		}
-	}
+	fmt.Println("$$$ Data:", buf.Bytes())
+	return buf
 }
