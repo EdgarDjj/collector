@@ -55,11 +55,23 @@ func run() error {
 	if c.ttl != 0 {
 		cpInput.TemplateTTL = uint32(c.ttl)
 	}
+	topic := c.kafkaConfig.Topic
+	kafkaHost := c.kafkaConfig.Host
+	kafkaPort := c.kafkaConfig.Port
+	addr := strings.Join([]string{kafkaHost, strconv.Itoa(kafkaPort)}, ":")
+	brokerList := []string{addr}
 
 	cp, err := InitCollectingProcess(cpInput)
 	if err != nil {
 		return err
 	}
+
+	kafkaProducer, err := initSyncProducer(brokerList, topic, true)
+	if err != nil {
+		log.Fatalln("Failed to start Sarama producer: ", err)
+		return err
+	}
+
 	// 监听连接与接受消息
 	messageReceived := make(chan *entities.Message)
 	go func() {
@@ -71,7 +83,7 @@ func run() error {
 		}
 	}()
 	stopCh := make(chan struct{})
-	go signalHandler(stopCh, messageReceived)
+	go signalHandler(stopCh, messageReceived, kafkaProducer)
 
 	<-stopCh
 	cp.Stop()
@@ -95,49 +107,34 @@ func newCollectorCommand() *cobra.Command {
 	return cmd
 }
 
-func addIPFIXFlags(fs *pflag.FlagSet) {
-	fs.StringVar(&IPFIXAddr, "ipfix.addr", "0.0.0.0", "IPFIX collector address")
-	fs.Uint16Var(&IPFIXPort, "ipfix.port", 4739, "IPFIX collector port")
-	fs.StringVar(&IPFIXTransport, "ipfix.transport", "udp", "IPFIX collector transport layer")
-}
-
-func signalHandler(stopCh chan struct{}, messageReceived chan *entities.Message) {
+func signalHandler(stopCh chan struct{}, messageReceived chan *entities.Message, kafkaProducer *KafkaProducer) {
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	var errCount, enqueueCount int
 	for {
 		select {
 		case msg := <-messageReceived:
 			// kafka的消费
 			buf := printIPFIXMessage(msg)
-			sendMessageByKafka(buf)
+			sendMessageByKafka(buf, kafkaProducer)
+			enqueueCount++
+		case err := <-kafkaProducer.producer.Errors():
+			log.Fatalln("failed to produce message", err)
+			errCount++
 		case <-signalCh:
 			close(stopCh)
 			return
 		}
 	}
+	log.Printf("EnqueueCount: %d errCount: %d\n", enqueueCount, errCount)
 }
 
 // 三种连接kafka方式 1、无认证 2、TLS认证 3、SASL/PLAIN
-func sendMessageByKafka(buf bytes.Buffer) {
-	topic := c.kafkaConfig.Topic
-	kafkaHost := c.kafkaConfig.Host
-	kafkaPort := c.kafkaConfig.Port
-	addr := strings.Join([]string{kafkaHost, strconv.Itoa(kafkaPort)}, ":")
-	brokerList := []string{addr}
-
-	kafkaProducer, err := newSyncProducer(brokerList, topic, true)
-
-	log.Printf("$$$ start send Message to Kafka, the topic is %s\n", topic)
-	if err != nil {
-		log.Fatalln("Failed to start start Sarama producer: ", err)
-		return
-	}
-
-	msgToSend := buf.Bytes()
-
+func sendMessageByKafka(buf bytes.Buffer, kafkaProducer *KafkaProducer) {
+	log.Println("$$$ start send Message to Kafka")
 	kafkaProducer.producer.Input() <- &sarama.ProducerMessage{
 		Topic: kafkaProducer.topic,
-		Value: sarama.ByteEncoder(msgToSend),
+		Value: sarama.ByteEncoder(buf.Bytes()),
 	}
 }
 
@@ -146,7 +143,7 @@ type KafkaProducer struct {
 	topic    string
 }
 
-func newSyncProducer(addrs []string, topic string, logErrors bool) (*KafkaProducer, error) {
+func initSyncProducer(addrs []string, topic string, logErrors bool) (*KafkaProducer, error) {
 	config := sarama.NewConfig()
 	config.Producer.Return.Successes = false
 
@@ -200,4 +197,10 @@ func printIPFIXMessage(msg *entities.Message) bytes.Buffer {
 	fmt.Println(buf.String())
 	//fmt.Println("$$$ Data:", buf.Bytes())
 	return buf
+}
+
+func addIPFIXFlags(fs *pflag.FlagSet) {
+	fs.StringVar(&IPFIXAddr, "ipfix.addr", "0.0.0.0", "IPFIX collector address")
+	fs.Uint16Var(&IPFIXPort, "ipfix.port", 4739, "IPFIX collector port")
+	fs.StringVar(&IPFIXTransport, "ipfix.transport", "udp", "IPFIX collector transport layer")
 }
