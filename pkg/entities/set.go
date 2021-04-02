@@ -79,7 +79,6 @@ func (s *set) GetSetType() ContentType {
 }
 
 func (s *set) UpdateLenInHeader() {
-	// TODO:Add padding to the length when multiple sets are sent in IPFIX message
 	if !s.isDecoding {
 		// Add length to the set header
 		binary.BigEndian.PutUint16(s.buffer.Bytes()[2:4], uint16(s.buffer.Len()))

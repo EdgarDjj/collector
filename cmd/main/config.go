@@ -1,10 +1,14 @@
 package main
 
 import (
-	"fmt"
 	"github.com/spf13/viper"
+	"log"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
+
+const IPFIXTransport = "udp"
 
 type UDP struct {
 	Host string
@@ -12,9 +16,10 @@ type UDP struct {
 }
 
 type Kafka struct {
-	Host  string
-	Port  int
-	Topic string
+	Host       string
+	Port       uint16
+	Topic      string
+	BrokerList []string
 }
 
 type Config struct {
@@ -22,13 +27,14 @@ type Config struct {
 	kafkaConfig *Kafka
 	maxBufSize  int
 	ttl         int
+	host        string
 }
 
 func InitConfigByViper() *viper.Viper {
 	config := viper.New()
 	step := string(filepath.Separator)
 	path := "$GOPATH" + step + "collector" + step
-	fmt.Println("Config Path load in :" + path)
+	log.Println("Config Path load in :" + path)
 	config.AddConfigPath(path)
 	config.SetConfigName("configuration.yml")
 	config.SetConfigType("yml")
@@ -38,7 +44,6 @@ func InitConfigByViper() *viper.Viper {
 	return config
 }
 
-// 配置读取
 func GetConfig() (c Config) {
 	var baseInfo = InitConfigByViper()
 	c.udpConfig = &UDP{
@@ -47,9 +52,11 @@ func GetConfig() (c Config) {
 	}
 	c.kafkaConfig = &Kafka{
 		Host:  baseInfo.GetString("kafka.host"),
-		Port:  baseInfo.GetInt("kafka.port"),
+		Port:  uint16(baseInfo.GetInt("kafka.port")),
 		Topic: baseInfo.GetString("kafka.topic"),
 	}
+	c.host = strings.Join([]string{baseInfo.GetString(c.kafkaConfig.Host), strconv.Itoa(int(c.kafkaConfig.Port))}, ":")
+	c.kafkaConfig.BrokerList = []string{c.host}
 	c.maxBufSize = baseInfo.GetInt("maxBufSize")
 	c.ttl = baseInfo.GetInt("ttl")
 	return c

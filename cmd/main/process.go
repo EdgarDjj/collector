@@ -81,10 +81,7 @@ func InitCollectingProcess(input CollectorInput) (*CollectingProcess, error) {
 
 func (cp *CollectingProcess) Start() {
 	if cp.protocol == "udp" {
-		fmt.Println("$$$ start UDP Server!")
 		cp.startUDPServer()
-	} else {
-		fmt.Println("!!! fail to start UDP Server!")
 	}
 }
 

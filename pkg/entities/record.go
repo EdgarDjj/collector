@@ -6,14 +6,13 @@ import (
 	"encoding/binary"
 	"fmt"
 )
+
 /*
-该程序包包含记录中字段的编码。使用本地缓冲区在此处构建记录，然后再写入消息缓冲区。
-相反，我们应该将字段直接写到消息上而不使用本地缓冲区吗？首先，我们将记录本地缓冲区。有一个接口并将功能公开给用户。
- */
+记录本地缓存，将其公开，写入进消息
+*/
 type Record interface {
 	PrepareRecord() (uint16, error)
 	AddInfoElement(element *InfoElementWithValue, isDecoding bool) (uint16, error)
-	// TODO: Functions for multiple elements as well.
 	GetBuffer() *bytes.Buffer
 	GetTemplateID() uint16
 	GetFieldCount() uint16

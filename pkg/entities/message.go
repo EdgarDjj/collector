@@ -5,13 +5,7 @@ import (
 	"encoding/binary"
 )
 
-const (
-	MaxTcpSocketMsgSize int = 65535
-	DefaultUDPMsgSize   int = 512
-	MaxUDPMsgSize       int = 1500
-)
-
-// Message represents IPFIX message.
+// IPFIX message.
 type Message struct {
 	buffer        *bytes.Buffer
 	version       uint16
